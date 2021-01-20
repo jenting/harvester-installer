@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
-	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
@@ -16,27 +15,31 @@ import (
 	"github.com/imdario/mergo"
 	"github.com/jroimartin/gocui"
 	cfg "github.com/rancher/harvester-installer/pkg/config"
+	"github.com/rancher/harvester-installer/pkg/util"
 	"github.com/rancher/k3os/pkg/config"
+	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/util/rand"
 )
 
-func getSSHKeysFromURL(url string) ([]string, error) {
-	client := http.Client{
-		Timeout: 15 * time.Second,
-	}
-	resp, err := client.Get(url)
+const (
+	defaultHTTPTimeout = 15 * time.Second
+)
+
+func getSSHKeysFromURL(httpClient util.HTTPClient, url string) ([]string, error) {
+	b, err := httpClient.Get(url, defaultHTTPTimeout)
 	if err != nil {
 		return nil, err
 	}
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
+
 	body := strings.TrimSuffix(string(b), "\n")
-	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("got unexpected status code: %d, body: %s", resp.StatusCode, body)
+	lines := strings.Split(body, "\n")
+	for _, line := range lines {
+		_, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+		if err != nil {
+			return nil, err
+		}
 	}
-	return strings.Split(body, "\n"), nil
+	return lines, nil
 }
 
 func getFormattedServerURL(addr string) string {
@@ -93,10 +96,6 @@ func customizeConfig() {
 	cfg.Config.K3OS.Modules = []string{"kvm", "vhost_net"}
 	cfg.Config.Hostname = "harvester-" + rand.String(5)
 
-	if cfg.Config.SSHKeyURL != "" {
-		cfg.Config.Runcmd = append(cfg.Config.Runcmd, fmt.Sprintf(`keys=$(curl -sfL --connect-timeout 30 %q) && echo "$keys">>%s`, cfg.Config.SSHKeyURL, authorizedFile))
-	}
-
 	if cfg.Config.InstallMode == modeJoin {
 		cfg.Config.K3OS.K3sArgs = append([]string{"agent"}, cfg.Config.ExtraK3sArgs...)
 		return
@@ -136,7 +135,7 @@ func doInstall(g *gocui.Gui) error {
 	)
 
 	if cfg.Config.K3OS.Install.ConfigURL != "" {
-		remoteConfig, err := getRemoteCloudConfig(cfg.Config.K3OS.Install.ConfigURL)
+		remoteConfig, err := getRemoteCloudConfig(util.DefaultHTTPClient{}, cfg.Config.K3OS.Install.ConfigURL)
 		if err != nil {
 			printToInstallPanel(g, err.Error())
 		} else if err := mergo.Merge(&cfg.Config.CloudConfig, remoteConfig, mergo.WithAppendSlice); err != nil {
@@ -214,20 +213,10 @@ func printToInstallPanel(g *gocui.Gui, message string) {
 	})
 }
 
-func getRemoteCloudConfig(configURL string) (*config.CloudConfig, error) {
-	client := http.Client{
-		Timeout: 15 * time.Second,
-	}
-	resp, err := client.Get(configURL)
+func getRemoteCloudConfig(httpClient util.HTTPClient, configURL string) (*config.CloudConfig, error) {
+	b, err := httpClient.Get(configURL, defaultHTTPTimeout)
 	if err != nil {
 		return nil, err
-	}
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("got %d status code from %s, body: %s", resp.StatusCode, configURL, string(b))
 	}
 	return cfg.ToCloudConfig(b)
 }
