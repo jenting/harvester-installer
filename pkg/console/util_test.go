@@ -1,11 +1,66 @@
 package console
 
 import (
+	"fmt"
+	"io/ioutil"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestGetSSHKeysFromURL(t *testing.T) {
+	keys, err := ioutil.ReadFile("testdata/keys")
+	if err != nil {
+		t.Fatalf("Fail to load fixture")
+	}
+	testCases := []struct {
+		path         string
+		httpResp     string
+		pubKeysCount int
+		expectError  string
+	}{
+		{
+			path:         "/keys",
+			httpResp:     string(keys),
+			pubKeysCount: 2,
+		},
+		{
+			path:        "/invalid",
+			httpResp:    "\nooxx",
+			expectError: "fail to parse on line 2: ooxx",
+		},
+		{
+			path:        "/empty",
+			httpResp:    "",
+			expectError: "no key found",
+		},
+	}
+
+	mux := http.NewServeMux()
+	for i := range testCases {
+		testCase := testCases[i]
+		mux.HandleFunc(testCase.path, func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintln(w, testCase.httpResp)
+		})
+	}
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	for _, testCase := range testCases {
+		t.Run(testCase.path, func(t *testing.T) {
+			pubKeys, err := getSSHKeysFromURL(ts.URL + testCase.path)
+			if testCase.expectError != "" {
+				assert.EqualError(t, err, testCase.expectError)
+			} else {
+				assert.Equal(t, nil, err)
+				assert.Equal(t, testCase.pubKeysCount, len(pubKeys))
+			}
+		})
+	}
+}
 
 func TestGetHarvesterManifestContent(t *testing.T) {
 	d := map[string]string{
