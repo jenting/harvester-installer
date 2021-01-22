@@ -48,7 +48,7 @@ func getURL(url string, timeout time.Duration) ([]byte, error) {
 	return body, nil
 }
 
-func getSSHKeysFromURL(url string) ([]string, error) {
+func getRemoteSSHKeys(url string) ([]string, error) {
 	b, err := getURL(url, defaultHTTPTimeout)
 	if err != nil {
 		return nil, err

@@ -341,7 +341,7 @@ func addSSHKeyPanel(c *Console) error {
 				return err
 			}
 			if url != "" {
-				pubKeys, err := getSSHKeysFromURL(url)
+				pubKeys, err := getRemoteSSHKeys(url)
 				if err != nil {
 					logrus.Error(err)
 					return c.setContentByName(validatorPanel, err.Error())

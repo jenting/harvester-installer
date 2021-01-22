@@ -16,42 +16,38 @@ func TestGetSSHKeysFromURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fail to load fixture")
 	}
+
 	testCases := []struct {
-		path         string
+		name         string
 		httpResp     string
 		pubKeysCount int
 		expectError  string
 	}{
 		{
-			path:         "/keys",
+			name:         "Two public keys",
 			httpResp:     string(keys),
 			pubKeysCount: 2,
 		},
 		{
-			path:        "/invalid",
+			name:        "Invalid public key",
 			httpResp:    "\nooxx",
 			expectError: "fail to parse on line 2: ooxx",
 		},
 		{
-			path:        "/empty",
+			name:        "No public key",
 			httpResp:    "",
 			expectError: "no key found",
 		},
 	}
 
-	mux := http.NewServeMux()
-	for i := range testCases {
-		testCase := testCases[i]
-		mux.HandleFunc(testCase.path, func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintln(w, testCase.httpResp)
-		})
-	}
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
 	for _, testCase := range testCases {
-		t.Run(testCase.path, func(t *testing.T) {
-			pubKeys, err := getSSHKeysFromURL(ts.URL + testCase.path)
+		t.Run(testCase.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintln(w, testCase.httpResp)
+			}))
+			defer ts.Close()
+
+			pubKeys, err := getRemoteSSHKeys(ts.URL)
 			if testCase.expectError != "" {
 				assert.EqualError(t, err, testCase.expectError)
 			} else {
